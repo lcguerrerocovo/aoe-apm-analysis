@@ -1,2 +1,22 @@
 .ipynb_checkpoints/
 env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+.envrc/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+
+# Data and output (optional, if you don't want to commit these)
+docs/*.html
