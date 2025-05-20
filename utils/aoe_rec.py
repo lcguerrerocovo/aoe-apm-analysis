@@ -91,3 +91,22 @@ def prepare_rec(filename, actions_to_remove = []):
     filtered_df['relative_minute'] = (filtered_df['datetime'] - start_time).dt.total_seconds() // 60   
     aggregated = filtered_df.groupby(['player', 'relative_minute', 'type']).size().reset_index(name='count')
     return aggregated
+
+def rec_to_df(filename):
+    with open(filename, mode='rb') as in_file:
+        match = parse_match(in_file)
+        jsonFile = json.dumps(serialize(match.actions), indent=2)
+    
+    df = pd.read_json(jsonFile)
+    
+    df['player'] = df['player'].apply(lambda x: x.get('number') if isinstance(x, dict) else x)
+        
+    player_mapping = {i+1: str(name) for i, name in enumerate(match.players)}
+    df['player'] = df['player'].replace(player_mapping)
+    df['datetime'] = pd.to_datetime(df['timestamp'])
+    start_time = df['datetime'].min()
+    df['relative_minute'] = (df['datetime'] - start_time).dt.total_seconds() // 60
+    df['relative_minute'] = df['relative_minute'].astype(int)
+    df.drop(columns=['timestamp', 'datetime'], inplace=True)
+
+    return df
