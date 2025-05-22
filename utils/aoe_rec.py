@@ -1,6 +1,8 @@
 import json
 import pandas as pd
 from mgz.model import parse_match, serialize
+from mgz.summary import Summary
+from datetime import datetime, timezone
 
 ACTION_TYPE_DESCRIPTIONS = {
     "ERROR": "Error or unknown action.",
@@ -69,6 +71,49 @@ ACTION_TYPE_DESCRIPTIONS = {
     "POSTGAME": "Postgame action (after the game ends).",
     # Add any additional or custom action types as needed
 }
+
+def format_duration(ms):
+    seconds = int(ms // 1000)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h:
+        return f"{h}:{m:02}:{s:02}"
+    else:
+        return f"{m}:{s:02}"
+
+def extract_match_summary(rec_path):
+    with open(rec_path, 'rb') as f:
+        s = Summary(f)
+        diplomacy = s.get_diplomacy()  # {'type': 'TG', 'team_size': '4v4'}
+        map_info = s.get_map()         # {'id': 12, 'name': 'Black Forest', 'size': 'Large', ...}
+        teams = s.get_teams()          # e.g. [[1, 3, 5, 7], [2, 4, 6, 8]]
+        players = s.get_players()      # list of dicts with 'name', 'number', 'civilization', etc.
+        duration = s.get_duration()    # milliseconds
+        start_ts = s.get_played()      # always the start time (timestamp)
+        if start_ts:
+            start_time = datetime.utcfromtimestamp(start_ts).strftime('%Y-%m-%d %H:%M UTC')
+        else:
+            start_time = '?'
+        # winners from players list
+        winners = [p['number'] for p in players if p.get('winner')]
+        winning_team = None
+        winning_team_players = []
+        for idx, team in enumerate(teams):
+            if any(num in winners for num in team):
+                winning_team = idx + 1  # 1-based index
+                winning_team_players = [p['name'] for p in players if p['number'] in team]
+                break
+        return {
+            'diplomacy': diplomacy,
+            'map': map_info,
+            'teams': teams,
+            'players': players,
+            'duration': format_duration(duration),
+            'winning_team': winning_team,
+            'winning_team_players': winning_team_players,
+            'start_time': start_time,
+        }
 
 def prepare_rec(filename, actions_to_remove = []):
     with open(filename, mode='rb') as in_file:

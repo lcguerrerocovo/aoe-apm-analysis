@@ -1,8 +1,11 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import chartify
+import pandas as pd
 from bokeh.models import HoverTool, Label
 from bokeh.core.properties import value
+from bokeh.io import output_file, save
+from bokeh.embed import components
 
 import colorsys
 
@@ -154,22 +157,35 @@ def display_full(df):
     pd.reset_option('display.width')
 
 
-def plot_apm(df_rec):
+def plot_apm(df_rec, output_html=None, return_components=False, max_minute=None):
+    """
+    Generate APM charts for each player in df_rec.
+    - If output_html is provided, save as standalone HTML (Bokeh output_file/save).
+    - If return_components is True, return list of (player, script, div) for embedding.
+    - If max_minute is provided, x-axis will be 0..max_minute for all players, filling missing minutes with zero actions.
+    - Otherwise, show interactively (for notebook or direct script use).
+    """
     melted = df_rec.pivot_table(
         index=['player', 'relative_minute', 'type'],
         values='count',
         aggfunc='sum'
     ).reset_index()
-    melted['relative_minute'] = melted['relative_minute'].astype(float).astype(int).astype(str)
+    melted['relative_minute'] = melted['relative_minute'].astype(float).astype(int)
     melted['player'] = melted['player'].astype(str)
 
+    results = []
     for player in melted['player'].unique():
-        player_df = melted[melted['player'] == player]
-        # Calculate average APM for the player
+        player_df = melted[melted['player'] == player].copy()
+        # Fill missing minutes with zero actions for all types
+        if max_minute is not None:
+            all_minutes = list(range(0, max_minute + 1))
+            all_types = player_df['type'].unique()
+            idx = pd.MultiIndex.from_product([[player], all_minutes, all_types], names=['player', 'relative_minute', 'type'])
+            player_df = player_df.set_index(['player', 'relative_minute', 'type']).reindex(idx, fill_value=0).reset_index()
+        player_df['relative_minute'] = player_df['relative_minute'].astype(str)
         total_actions = player_df['count'].sum()
         total_minutes = player_df['relative_minute'].astype(float).nunique()
         avg_apm = total_actions / total_minutes if total_minutes else 0
-        # Calculate type counts and percentages for this player only
         type_counts = (
             player_df.groupby('type')['count']
             .sum()
@@ -177,9 +193,11 @@ def plot_apm(df_rec):
         )
         total_actions = type_counts.sum()
         stack_order = type_counts.index.tolist()
-        minute_order = [m for m in sorted(player_df['relative_minute'].unique(), key=lambda x: int(x))]
+        if max_minute is not None:
+            minute_order = [str(m) for m in range(0, max_minute + 1)]
+        else:
+            minute_order = [m for m in sorted(player_df['relative_minute'].unique(), key=lambda x: int(x))]
         player_df = player_df.sort_values('relative_minute', key=lambda x: x.astype(int))
-        print(player_df.head())
         ch = chartify.Chart(blank_labels=True, x_axis_type='categorical')
         ch.figure.width = 1200
         ch.set_title(f'Actions for {player}')
@@ -203,19 +221,13 @@ def plot_apm(df_rec):
         ch.figure.add_tools(hover)
         ch.figure.legend.orientation = "vertical"
         ch.figure.legend.label_text_font_size = "7pt"
-        # Add total and percent to legend
         for idx, t in enumerate(stack_order):
             if idx < len(ch.figure.legend[0].items):
                 percent = (type_counts[t] / total_actions * 100) if total_actions else 0
                 ch.figure.legend[0].items[idx].label = value(f"{t} ({type_counts[t]}, {percent:.1f}%)")
-        # Add a Bokeh Label to the underlying figure
-        # Sum counts across all types for each minute
         minute_totals = player_df.groupby('relative_minute')['count'].sum()
         y_pos = minute_totals.max()
-
-        # Place the label just outside the last bar
         x_pos = len(player_df['relative_minute'].unique()) + 1
-
         label = Label(
             x=x_pos, y=y_pos,
             x_units='data', y_units='data',
@@ -224,4 +236,17 @@ def plot_apm(df_rec):
             text_color='black'
         )
         ch.figure.add_layout(label)
-        ch.show()
+        if return_components:
+            # For embedding in a custom HTML page
+            script, div = components(ch.figure)
+            results.append((player, script, div))
+        elif output_html:
+            # For saving as standalone HTML
+            output_file(output_html)
+            save(ch.figure)
+        else:
+            # For interactive use (notebook or direct script)
+            ch.show()
+    if return_components:
+        return results
+    return None
